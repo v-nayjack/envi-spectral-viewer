@@ -1,0 +1,12 @@
+name: "@ehofesmann/envi-spectral-viewer"
+description: ENVI hyperspectral image viewer with pixel spectral profile plotting
+version: 1.0.0
+fiftyone:
+  version: "*"
+operators:
+  - load_hsi_image
+  - get_spectral_profile
+  - render_rgb_image
+  - show_hsi_data
+panels:
+  - SpectralProfilePanel
