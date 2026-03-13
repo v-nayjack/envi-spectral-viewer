@@ -4,7 +4,7 @@ A [FiftyOne](https://github.com/voxel51/fiftyone) plugin for exploring hyperspec
 
 ![ENVI Spectral Viewer](assets/screenshot.png)
 
-<video src="assets/demo.mp4" controls width="100%"></video>
+![Demo](assets/demo.gif)
 
 ## Overview
 
