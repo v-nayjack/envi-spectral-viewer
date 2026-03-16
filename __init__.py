@@ -127,10 +127,9 @@ def _envi_open(hdr_path, img_path=None):
 @execution_cache(residency="ephemeral", max_size=8)
 def _localize_envi(ctx, hsi_filepath, hsi_img_filepath):
     """
-    Return (local_hdr_path, local_img_path) for an ENVI file, downloading from
-    cloud if needed.
-    - FiftyOne Teams: uses fo.media_cache when available (handles deduplication
-      and cache eviction automatically).
+    Return local_hdr_path for an ENVI file, downloading from cloud if needed.
+    Also ensures the img file is available alongside the hdr in the same dir.
+    - FiftyOne Enterprise: uses fo.media_cache when available.
     - Cloud paths without media_cache: downloads to a temp dir.
     - Local paths: returned as-is.
     Result is cached in-memory (up to 8 files) so repeated pixel clicks are fast.
@@ -139,11 +138,11 @@ def _localize_envi(ctx, hsi_filepath, hsi_img_filepath):
 
     if getattr(fo, "media_cache", None) is not None:
         hdr_local = fo.media_cache.get_local_path(hsi_filepath)
-        img_local = fo.media_cache.get_local_path(hsi_img_filepath)
-        return hdr_local, img_local
+        fo.media_cache.get_local_path(hsi_img_filepath)
+        return hdr_local
 
     if _is_local(hsi_filepath):
-        return hsi_filepath, hsi_img_filepath
+        return hsi_filepath
 
     path_hash = str(abs(hash(hsi_filepath)))[:12]
     tmp_dir   = os.path.join(tempfile.gettempdir(), f"hsi_envi_{path_hash}")
@@ -157,7 +156,15 @@ def _localize_envi(ctx, hsi_filepath, hsi_img_filepath):
     if not os.path.exists(img_local):
         _write_file_bytes(_read_file_bytes(hsi_img_filepath), img_local)
 
-    return hdr_local, img_local
+    return hdr_local
+
+
+def _get_local_img_path(hsi_img_filepath, local_hdr):
+    """Return local img path given the original img filepath and local hdr path."""
+    if _is_local(hsi_img_filepath):
+        return hsi_img_filepath
+    # Cloud case: img was downloaded to same tmpdir as hdr
+    return os.path.join(os.path.dirname(local_hdr), "data.img")
 
 
 # ── Operators ─────────────────────────────────────────────────────────────────
@@ -225,7 +232,8 @@ class GetSpectralProfile(foo.Operator):
         hsi_x = int(np.clip(round(pixel_x / scale), 0, cols - 1))
         hsi_y = int(np.clip(round(pixel_y / scale), 0, rows - 1))
 
-        local_hdr, local_img = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
+        local_hdr = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
+        local_img = _get_local_img_path(sample["hsi_img_filepath"], local_hdr)
         img       = _envi_open(local_hdr, local_img)
         spectrum  = img[hsi_y, hsi_x, :].flatten().tolist()
 
@@ -271,7 +279,8 @@ class RenderRgbImage(foo.Operator):
         rows, cols, n_bands = hsi_shape
         scale               = sample.get_field("hsi_scale_factor") or 1
 
-        local_hdr, local_img = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
+        local_hdr = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
+        local_img = _get_local_img_path(sample["hsi_img_filepath"], local_hdr)
         cube      = _envi_open(local_hdr, local_img).load()   # (rows, cols, bands)
 
         def normalize(band_data):
