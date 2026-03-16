@@ -84,7 +84,7 @@ class _EnviImage:
         self.dtype   = np.dtype(dtype)
         # Locate .img file
         base = os.path.splitext(hdr_path)[0]
-        for ext in (".img", ".dat", ".sli", ""):
+        for ext in (".img", ".dat", ".bin", ".sli", ""):
             candidate = base + ext
             if os.path.exists(candidate):
                 self.img_path = candidate
@@ -107,10 +107,10 @@ class _EnviImage:
         """Load full cube as (rows, cols, bands) float32 array."""
         return np.array(self._mm).transpose(0, 2, 1).astype(np.float32)
 
-def _envi_open(hdr_path):
+def _envi_open(hdr_path, img_path=None):
     try:
         import spectral.io.envi as envi
-        return envi.open(hdr_path)
+        return envi.open(hdr_path, img_path)
     except ImportError:
         hdr = _parse_envi_header(hdr_path)
         interleave = hdr.get("interleave", "bil").lower()
@@ -127,7 +127,8 @@ def _envi_open(hdr_path):
 @execution_cache(residency="ephemeral", max_size=8)
 def _localize_envi(ctx, hsi_filepath, hsi_img_filepath):
     """
-    Return a local .hdr path for an ENVI file, downloading from cloud if needed.
+    Return (local_hdr_path, local_img_path) for an ENVI file, downloading from
+    cloud if needed.
     - FiftyOne Teams: uses fo.media_cache when available (handles deduplication
       and cache eviction automatically).
     - Cloud paths without media_cache: downloads to a temp dir.
@@ -138,11 +139,11 @@ def _localize_envi(ctx, hsi_filepath, hsi_img_filepath):
 
     if getattr(fo, "media_cache", None) is not None:
         hdr_local = fo.media_cache.get_local_path(hsi_filepath)
-        fo.media_cache.get_local_path(hsi_img_filepath)
-        return hdr_local
+        img_local = fo.media_cache.get_local_path(hsi_img_filepath)
+        return hdr_local, img_local
 
     if _is_local(hsi_filepath):
-        return hsi_filepath
+        return hsi_filepath, hsi_img_filepath
 
     path_hash = str(abs(hash(hsi_filepath)))[:12]
     tmp_dir   = os.path.join(tempfile.gettempdir(), f"hsi_envi_{path_hash}")
@@ -156,7 +157,7 @@ def _localize_envi(ctx, hsi_filepath, hsi_img_filepath):
     if not os.path.exists(img_local):
         _write_file_bytes(_read_file_bytes(hsi_img_filepath), img_local)
 
-    return hdr_local
+    return hdr_local, img_local
 
 
 # ── Operators ─────────────────────────────────────────────────────────────────
@@ -224,8 +225,8 @@ class GetSpectralProfile(foo.Operator):
         hsi_x = int(np.clip(round(pixel_x / scale), 0, cols - 1))
         hsi_y = int(np.clip(round(pixel_y / scale), 0, rows - 1))
 
-        local_hdr = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
-        img       = _envi_open(local_hdr)
+        local_hdr, local_img = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
+        img       = _envi_open(local_hdr, local_img)
         spectrum  = img[hsi_y, hsi_x, :].flatten().tolist()
 
         ctx.trigger(
@@ -270,8 +271,8 @@ class RenderRgbImage(foo.Operator):
         rows, cols, n_bands = hsi_shape
         scale               = sample.get_field("hsi_scale_factor") or 1
 
-        local_hdr = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
-        cube      = _envi_open(local_hdr).load()   # (rows, cols, bands)
+        local_hdr, local_img = _localize_envi(ctx, sample["hsi_filepath"], sample["hsi_img_filepath"])
+        cube      = _envi_open(local_hdr, local_img).load()   # (rows, cols, bands)
 
         def normalize(band_data):
             p2, p98 = np.percentile(band_data, (2, 98))
