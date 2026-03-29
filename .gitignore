@@ -1,7 +1,16 @@
-# Node modules
+# Node
 node_modules/
+.yarn/
 
+# Python virtual environment
+.venv/
 __pycache__
+
+# uv project files (not part of Eric's original plugin)
+pyproject.toml
+uv.lock
+.python-version
+main.py
 
 # Logs
 logs/
@@ -34,3 +43,12 @@ jspm_packages/
 
 # Mac system files
 .DS_Store
+
+# Synthetic test data (large binary files)
+data/synthetic/
+
+# FiftyOne symlink (local dev only)
+fiftyone
+
+# misc dir
+ignore/

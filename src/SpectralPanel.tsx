@@ -2,7 +2,7 @@ import { LoadingSpinner } from "@fiftyone/components";
 import { executeOperator } from "@fiftyone/operators";
 import * as fos from "@fiftyone/state";
 import { Typography } from "@mui/material";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRecoilState, useRecoilValue } from "recoil";
 import styled from "styled-components";
 import {
@@ -95,6 +95,16 @@ const RightCol = styled.div`
   gap: 0.4em;
 `;
 
+/* ── Zoom: outer clip container ── */
+const ZoomContainer = styled.div`
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: crosshair;
+`;
+
+/* ── Zoom: inner transformable wrapper ── */
 const ImageInner = styled.div`
   position: relative;
   width: 100%;
@@ -137,6 +147,20 @@ const Hint = styled.div`
   color: #555;
   font-size: 12px;
   font-style: italic;
+`;
+
+/* ── Zoom indicator badge ── */
+const ZoomBadge = styled.div`
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ccc;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 10;
 `;
 
 /* ── Bottom bar (horizontal controls) ── */
@@ -240,6 +264,23 @@ const RenderBtn = styled.button`
   &:disabled { opacity: 0.6; cursor: default; }
 `;
 
+const ClearBtn = styled.button`
+  width: 52px;
+  height: 26px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #999;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  &:hover { background: #3f3f46; color: #fff; border-color: #555; }
+`;
+
 // ── SVG Spectral Chart ────────────────────────────────────────────────────────
 
 interface BandLine {
@@ -279,17 +320,22 @@ function SpectralChart({ wavelengths, intensities, bandLines = [], loading = fal
     wl: Math.round(minWl + t * (maxWl - minWl)),
     x: t * iW,
   }));
+
   const yTicks = isEmpty
     ? [0, 0.5, 1].map((t) => ({ val: "—", y: iH - t * iH }))
-    : [0, 0.5, 1].map((t) => ({
-        val: (minI + t * rangeI).toFixed(1),
-        y: iH - t * iH,
-      }));
+    : [0, 0.5, 1].map((t) => {
+        const val = minI + t * rangeI;
+        return { val: val > 100 ? val.toFixed(0) : val.toFixed(1), y: iH - t * iH };
+      });
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ width: "100%", height: "100%" }}
+    >
       <defs>
-        <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
+        <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
           {gradientStops.map((s, i) => (
             <stop key={i} offset={s.offset} stopColor={s.color} />
           ))}
@@ -297,70 +343,40 @@ function SpectralChart({ wavelengths, intensities, bandLines = [], loading = fal
       </defs>
 
       <g transform={`translate(${PAD.left},${PAD.top})`}>
-        {/* Grid */}
-        {yTicks.map((t, i) => (
-          <line key={i} x1={0} y1={t.y} x2={iW} y2={t.y} stroke="#1e1e1e" strokeWidth={1} />
-        ))}
+        {/* Empty-state prompt */}
+        {isEmpty && !loading && (
+          <text
+            x={iW / 2} y={iH / 2}
+            textAnchor="middle" dominantBaseline="middle"
+            fill="#555" fontSize={11}
+          >
+            Click a pixel to view its spectrum
+          </text>
+        )}
+
+        {/* Loading indicator when no previous spectrum */}
+        {isEmpty && loading && (
+          <text
+            x={iW / 2} y={iH / 2}
+            textAnchor="middle" dominantBaseline="middle"
+            fill="#ff6d04" fontSize={11}
+          >
+            Loading spectrum…
+            <animate attributeName="opacity" values="1;0.3;1" dur="1.4s" repeatCount="indefinite" />
+          </text>
+        )}
 
         {/* Band indicator lines */}
         {bandLines.map((bl, i) => {
-          const wl = wavelengths[bl.bandIdx];
-          if (wl == null) return null;
-          const x = toX(wl);
+          if (bl.bandIdx < 0 || bl.bandIdx >= wavelengths.length) return null;
+          const x = toX(wavelengths[bl.bandIdx]);
           return (
             <g key={i}>
-              <line
-                x1={x} y1={0} x2={x} y2={iH}
-                stroke={bl.color} strokeWidth={1.5}
-                strokeDasharray="4,3" opacity={0.8}
-              />
-              <text x={x + 3} y={8} fill={bl.color} fontSize={8} opacity={0.9}>
-                {bl.label}
-              </text>
+              <line x1={x} y1={0} x2={x} y2={iH} stroke={bl.color} strokeWidth={1} strokeDasharray="4 3" opacity={0.6} />
+              <text x={x} y={-2} textAnchor="middle" fill={bl.color} fontSize={8}>{bl.label}</text>
             </g>
           );
         })}
-
-        {/* Empty state / loading state */}
-        {isEmpty && (
-          <>
-            <rect
-              x={0} y={iH / 2 - 1} width={iW} height={2}
-              fill={`url(#${gradId})`} opacity={loading ? 0.5 : 0.25}
-            >
-              {loading && (
-                <animate attributeName="opacity" values="0.5;0.15;0.5" dur="1.4s" repeatCount="indefinite" />
-              )}
-            </rect>
-            {loading ? (
-              <text
-                x={iW / 2} y={iH / 2}
-                textAnchor="middle" dominantBaseline="middle"
-                fill="#ff6d04" fontSize={10}
-              >
-                Loading spectrum…
-                <animate attributeName="opacity" values="1;0.3;1" dur="1.4s" repeatCount="indefinite" />
-              </text>
-            ) : (
-              <>
-                <text
-                  x={iW / 2} y={iH / 2 - 10}
-                  textAnchor="middle" dominantBaseline="middle"
-                  fill="#555" fontSize={10}
-                >
-                  Click a pixel on the image
-                </text>
-                <text
-                  x={iW / 2} y={iH / 2 + 8}
-                  textAnchor="middle" dominantBaseline="middle"
-                  fill="#3a3a3a" fontSize={9}
-                >
-                  to plot its spectral signature here
-                </text>
-              </>
-            )}
-          </>
-        )}
 
         {/* Spectrum line — dimmed while loading next pixel */}
         {!isEmpty && (
@@ -432,9 +448,11 @@ const RGB_CHANNELS = [
 function BandControls({
   sampleId,
   spectrum,
+  onClear,
 }: {
   sampleId: string | null;
   spectrum: any;
+  onClear: () => void;
 }) {
   const wavelengths = useRecoilValue(hsiWavelengthsAtom);
   const [bands, setBands] = useRecoilState(hsiRgbBandsAtom);
@@ -512,6 +530,10 @@ function BandControls({
       )}
 
       {spectrum && (
+        <ClearBtn onClick={onClear}>Clear</ClearBtn>
+      )}
+
+      {spectrum && (
         <PixelInfo>
           ({spectrum.pixel_x}, {spectrum.pixel_y})
         </PixelInfo>
@@ -537,8 +559,21 @@ export function SpectralPanel() {
   // Track which sample is currently open in the modal
   const currentSampleId: string | null = useRecoilValue(fos.currentSampleId as any);
 
+  // Pixel dot position (screen coords for overlay)
   const dotPosRef = useRef<{ x: number; y: number } | null>(null);
 
+  // ── Ref for ZoomContainer (reliable coordinate mapping) ───────────────────
+  const zoomContainerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // ── Zoom & pan state ──────────────────────────────────────────────────────
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const panOrigin = useRef({ x: 0, y: 0 });
+
+  // ── Load HSI data when sample changes ─────────────────────────────────────
   useEffect(() => {
     if (!dataset || !currentSampleId) return;
     if (currentSampleId === sampleId) return; // already loaded
@@ -549,35 +584,140 @@ export function SpectralPanel() {
     setWavelengths([]);
     dotPosRef.current = null;
 
+    // Reset zoom when switching samples
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+
     setLoading(true);
     executeOperator("@ehofesmann/envi-spectral-viewer/load_hsi_image", { sample_id: currentSampleId });
   }, [currentSampleId, dataset]);
 
+  // ── Zoom via mouse wheel ──────────────────────────────────────────────────
+  const handleWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const container = zoomContainerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+
+      // Cursor position relative to the container
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+
+      const prevZoom = zoom;
+      const delta = e.deltaY > 0 ? -0.15 : 0.15;
+      const nextZoom = Math.min(Math.max(prevZoom + delta * prevZoom, 1), 15);
+
+      // Adjust pan so the point under the cursor stays fixed
+      const scale = nextZoom / prevZoom;
+      const newPanX = cursorX - scale * (cursorX - pan.x);
+      const newPanY = cursorY - scale * (cursorY - pan.y);
+
+      setZoom(nextZoom);
+      setPan(nextZoom <= 1 ? { x: 0, y: 0 } : { x: newPanX, y: newPanY });
+    },
+    [zoom, pan]
+  );
+
+  // ── Pan via Alt+drag ──────────────────────────────────────────────────────
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (zoom <= 1) return;
+      // Pan on middle-click or Alt+left-click
+      if (e.button === 1 || e.altKey) {
+        e.preventDefault();
+        isPanning.current = true;
+        panStart.current = { x: e.clientX, y: e.clientY };
+        panOrigin.current = { ...pan };
+      }
+    },
+    [zoom, pan]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!isPanning.current) return;
+      const dx = e.clientX - panStart.current.x;
+      const dy = e.clientY - panStart.current.y;
+      setPan({ x: panOrigin.current.x + dx, y: panOrigin.current.y + dy });
+    },
+    []
+  );
+
+  const handleMouseUp = useCallback(() => {
+    isPanning.current = false;
+  }, []);
+
+  // ── Double-click to reset zoom ────────────────────────────────────────────
+  const handleDoubleClick = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    dotPosRef.current = null;
+  }, []);
+
+  // ── Clear spectrum selection ──────────────────────────────────────────────
+  const handleClear = useCallback(() => {
+    setSpectrum(null);
+    dotPosRef.current = null;
+  }, []);
+
+  // ── Click to select pixel (zoom-aware) ────────────────────────────────────
   const handleImageClick = useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
-      if (!sampleId) return;
-      const img = e.target as HTMLImageElement;
-      const rect = img.getBoundingClientRect();
-      const displayX = e.clientX - rect.left;
-      const displayY = e.clientY - rect.top;
+      if (!sampleId || isPanning.current) return;
+      // Alt+click is for panning, not pixel selection
+      if (e.altKey) return;
 
-      // With object-fit: contain + object-position: left top, the rendered
-      // image content starts at (0,0) and is constrained by whichever axis hits first.
-      const natAspect = img.naturalWidth / img.naturalHeight;
-      const elAspect  = rect.width / rect.height;
-      const renderedW = natAspect > elAspect ? rect.width  : rect.height * natAspect;
-      const renderedH = natAspect > elAspect ? rect.width / natAspect : rect.height;
+      const img = imgRef.current;
+      const container = zoomContainerRef.current;
+      if (!img || !container) return;
+      const rect = container.getBoundingClientRect();
 
-      // object-position: center top → image is horizontally centered, top-aligned
-      const offsetX = (rect.width - renderedW) / 2;
-      const imgX = displayX - offsetX;
-      const imgY = displayY;
+      // Cursor position relative to the ZoomContainer
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
 
-      if (imgX < 0 || imgX > renderedW || imgY > renderedH) return; // click in blank area
+      // Reverse the zoom/pan transform to get position in unzoomed space
+      const unzoomedX = (cursorX - pan.x) / zoom;
+      const unzoomedY = (cursorY - pan.y) / zoom;
 
-      const pixel_x = Math.round((imgX / renderedW) * img.naturalWidth);
-      const pixel_y = Math.round((imgY / renderedH) * img.naturalHeight);
-      dotPosRef.current = { x: displayX, y: imgY };
+      // Map from unzoomed display coords to actual pixel coords
+      // (object-fit: contain with center-top alignment)
+      const natW = img.naturalWidth;
+      const natH = img.naturalHeight;
+      const natAspect = natW / natH;
+
+      // The container's logical (unzoomed) size
+      const containerW = rect.width;
+      const containerH = rect.height;
+      const elAspect = containerW / containerH;
+
+      // How big the image renders within the container (object-fit: contain)
+      const renderedW = natAspect > elAspect ? containerW : containerH * natAspect;
+      const renderedH = natAspect > elAspect ? containerW / natAspect : containerH;
+
+      // object-position: center top → horizontally centered, top-aligned
+      const offsetX = (containerW - renderedW) / 2;
+      const offsetY = 0; // top-aligned
+
+      const localX = unzoomedX - offsetX;
+      const localY = unzoomedY - offsetY;
+
+      // Ignore clicks outside the actual image area
+      if (localX < 0 || localX > renderedW || localY < 0 || localY > renderedH) return;
+
+      const pixel_x = Math.round((localX / renderedW) * natW);
+      const pixel_y = Math.round((localY / renderedH) * natH);
+
+      // Clamp to valid range
+      if (pixel_x < 0 || pixel_x >= natW || pixel_y < 0 || pixel_y >= natH) return;
+
+      // Store dot position in the transformed (zoomed) image space
+      // so the dot appears at the right visual location
+      const dotX = localX * zoom + pan.x;
+      const dotY = localY * zoom + pan.y;
+      dotPosRef.current = { x: dotX, y: dotY };
+
       setLoading(true);
       executeOperator("@ehofesmann/envi-spectral-viewer/get_spectral_profile", {
         sample_id: sampleId,
@@ -585,7 +725,7 @@ export function SpectralPanel() {
         pixel_y,
       });
     },
-    [sampleId]
+    [sampleId, zoom, pan]
   );
 
   // Build band lines for the spectrum chart
@@ -602,21 +742,45 @@ export function SpectralPanel() {
   return (
     <Container>
       <TopSection>
-        {/* Left: image */}
+        {/* Left: image with zoom/pan support */}
         <LeftCol>
           {loading && !image && <Hint>Loading…</Hint>}
           {image && (
-            <ImageInner>
-              <HsiImage
-                src={image}
-                alt="HSI pseudo-RGB"
-                onClick={handleImageClick}
-                title="Click a pixel to see its spectral profile"
-              />
+            <ZoomContainer
+              ref={zoomContainerRef}
+              onWheel={handleWheel}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onDoubleClick={handleDoubleClick}
+              title={zoom > 1
+                ? "Scroll to zoom · Alt+drag to pan · Double-click to reset"
+                : "Scroll to zoom · Click a pixel for spectral profile"}
+            >
+              {/* Zoom level indicator */}
+              {zoom > 1 && (
+                <ZoomBadge>{zoom.toFixed(1)}×</ZoomBadge>
+              )}
+
+              <ImageInner style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: '0 0',
+              }}>
+                <HsiImage
+                  ref={imgRef}
+                  src={image}
+                  alt="HSI pseudo-RGB"
+                  onClick={handleImageClick}
+                  draggable={false}
+                />
+              </ImageInner>
+
+              {/* Pixel dot rendered in ZoomContainer space (not inside the transform) */}
               {dotPosRef.current && spectrum && (
                 <PixelDot x={dotPosRef.current.x} y={dotPosRef.current.y} />
               )}
-            </ImageInner>
+            </ZoomContainer>
           )}
         </LeftCol>
 
@@ -636,7 +800,7 @@ export function SpectralPanel() {
       </TopSection>
 
       {/* Bottom: horizontal channel controls */}
-      <BandControls sampleId={sampleId} spectrum={spectrum} />
+      <BandControls sampleId={sampleId} spectrum={spectrum} onClear={handleClear} />
     </Container>
   );
 }
