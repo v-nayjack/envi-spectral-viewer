@@ -719,7 +719,7 @@ export function SpectralPanel() {
   const handleDoubleClick = useCallback(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
-    dotImagePos.current = null;
+    // Don't clear dotImagePos — pixel selection should survive zoom reset
   }, []);
 
   // ── Clear spectrum selection ──────────────────────────────────────────────
@@ -734,6 +734,8 @@ export function SpectralPanel() {
       if (!sampleId || isPanning.current) return;
       // Alt+click is for panning, not pixel selection
       if (e.altKey) return;
+      // Ignore the second click of a double-click (detail === 2)
+      if (e.detail > 1) return;
 
       const img = imgRef.current;
       const container = zoomContainerRef.current;
