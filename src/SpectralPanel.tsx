@@ -731,6 +731,8 @@ export function SpectralPanel() {
   // ── Click to select pixel (zoom-aware) ────────────────────────────────────
   const handleImageClick = useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
+      // prevent click from bubbling to modal close handler
+      e.stopPropagation();
       if (!sampleId || isPanning.current) return;
       // Alt+click is for panning, not pixel selection
       if (e.altKey) return;
