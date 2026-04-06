@@ -1,4 +1,4 @@
-import { LoadingSpinner } from "@fiftyone/components";
+import { LoadingSpinner as _LoadingSpinner } from "@fiftyone/components";
 import { executeOperator } from "@fiftyone/operators";
 import * as fos from "@fiftyone/state";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,6 +15,10 @@ import {
   hsiSpectrumAtom,
   hsiWavelengthsAtom,
 } from "./atoms";
+
+// LoadingSpinner may not exist in older FiftyOne versions (pre-2.14)
+// Fall back to a simple text indicator if unavailable
+const LoadingSpinner = _LoadingSpinner ?? (() => <span style={{ fontSize: 10 }}>…</span>);
 
 // ── Wavelength → visible color ────────────────────────────────────────────────
 
@@ -731,8 +735,7 @@ export function SpectralPanel() {
   // ── Click to select pixel (zoom-aware) ────────────────────────────────────
   const handleImageClick = useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
-      // prevent click from bubbling to modal close handler
-      e.stopPropagation();
+      e.stopPropagation(); // prevent click from bubbling to modal close handler
       if (!sampleId || isPanning.current) return;
       // Alt+click is for panning, not pixel selection
       if (e.altKey) return;
